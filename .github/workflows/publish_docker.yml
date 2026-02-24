@@ -15,6 +15,8 @@ env:
   CONTAINER_REGISTRY: "ghcr.io"
   CONTAINER_REPOSITORY: "lancemccarthy/vulnogram"
   DOCKERFILE_PATH: "Dockerfile"
+  GHCR_PACKAGE_NAME: "vulnogram"
+  GHCR_DELETE_UNTAGGED_OLDER_THAN_DAYS: "7"
 
 jobs:
   dockerfile_to_dockerhub:
@@ -55,12 +57,98 @@ jobs:
         push: true
         tags: ${{steps.meta.outputs.tags}}
 
-    - name: Delete old Docker images
-      uses: actions/delete-package-versions@v5
+    - name: Delete untagged GHCR versions older than retention
+      uses: actions/github-script@v7
+      env:
+        GHCR_PACKAGE_NAME: ${{env.GHCR_PACKAGE_NAME}}
+        CONTAINER_REPOSITORY: ${{env.CONTAINER_REPOSITORY}}
+        RETENTION_DAYS: ${{env.GHCR_DELETE_UNTAGGED_OLDER_THAN_DAYS}}
       with:
-        package-name: "vulnogram"
-        package-type: container
-        delete-only-untagged-versions: true
-        min-versions-to-keep: 2
-        token: ${{secrets.GITHUB_TOKEN}}
+        github-token: ${{secrets.GITHUB_TOKEN}}
+        script: |
+          const owner = context.repo.owner;
+          const packageName = process.env.GHCR_PACKAGE_NAME || 'vulnogram';
+          const packageType = 'container';
+          const retentionDays = Number(process.env.RETENTION_DAYS || '3');
+          const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+
+          const expectedFromRepo = (process.env.CONTAINER_REPOSITORY || '').split('/').pop();
+          if (packageName !== 'vulnogram') {
+            core.setFailed(`Safety stop: cleanup is restricted to package 'vulnogram'. Got '${packageName}'.`);
+            return;
+          }
+          if (expectedFromRepo && expectedFromRepo !== packageName) {
+            core.setFailed(`Safety stop: CONTAINER_REPOSITORY resolves to '${expectedFromRepo}', but cleanup package is '${packageName}'.`);
+            return;
+          }
+
+          async function listVersions(scope) {
+            const versions = [];
+            let page = 1;
+
+            while (true) {
+              const route = scope === 'org'
+                ? 'GET /orgs/{org}/packages/{package_type}/{package_name}/versions'
+                : 'GET /users/{username}/packages/{package_type}/{package_name}/versions';
+
+              const params = scope === 'org'
+                ? { org: owner, package_type: packageType, package_name: packageName, per_page: 100, page }
+                : { username: owner, package_type: packageType, package_name: packageName, per_page: 100, page };
+
+              let response;
+              try {
+                response = await github.request(route, params);
+              } catch (error) {
+                if (error.status === 404 && page === 1) {
+                  return null;
+                }
+                throw error;
+              }
+
+              const pageData = response.data || [];
+              if (!pageData.length) {
+                break;
+              }
+
+              versions.push(...pageData);
+              if (pageData.length < 100) {
+                break;
+              }
+              page += 1;
+            }
+
+            return versions;
+          }
+
+          const orgVersions = await listVersions('org');
+          const scope = orgVersions ? 'org' : 'user';
+          const versions = orgVersions || await listVersions('user') || [];
+
+          core.info(`Found ${versions.length} package versions in GHCR (${scope} scope).`);
+
+          let deleted = 0;
+          for (const version of versions) {
+            const tags = version?.metadata?.container?.tags || [];
+            const isUntagged = tags.length === 0;
+            const timestamp = Date.parse(version.updated_at || version.created_at || '');
+            const isOlderThanRetention = Number.isFinite(timestamp) && timestamp < cutoffMs;
+
+            if (!isUntagged || !isOlderThanRetention) {
+              continue;
+            }
+
+            const deleteRoute = scope === 'org'
+              ? 'DELETE /orgs/{org}/packages/{package_type}/{package_name}/versions/{package_version_id}'
+              : 'DELETE /users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}';
+
+            const deleteParams = scope === 'org'
+              ? { org: owner, package_type: packageType, package_name: packageName, package_version_id: version.id }
+              : { username: owner, package_type: packageType, package_name: packageName, package_version_id: version.id };
+
+            await github.request(deleteRoute, deleteParams);
+            deleted += 1;
+            core.info(`Deleted version id=${version.id} updated_at=${version.updated_at || version.created_at}`);
+          }
+
+          core.info(`Cleanup complete. Deleted ${deleted} untagged version(s) older than ${retentionDays} day(s).`);
 
