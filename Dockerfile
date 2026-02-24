@@ -12,6 +12,7 @@ RUN npm install
 
 USER root
 COPY . /home/vulnogram/
+RUN sed -i 's/\r$//' /home/vulnogram/scripts/*.sh && chmod +x /home/vulnogram/scripts/*.sh
 
 RUN chown vulnogram:vulnogram --recursive .
 USER vulnogram
