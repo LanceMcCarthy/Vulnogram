@@ -1,0 +1,61 @@
+name: Publish LinkCheck.UI
+
+on:
+  workflow_dispatch:
+      
+permissions:
+  contents: read
+  packages: write # For GitHub Packages auth
+
+env:
+  CONTAINER_REGISTRY: "ghcr.io"
+  CONTAINER_REPOSITORY: "lancemccarthy/vulnogram"
+  DOCKERFILE_PATH: "Dockerfile"
+
+jobs:
+  dockerfile_to_dockerhub:
+    name: "Dockerfile Build and Publish"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+      
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Get package metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{env.CONTAINER_REGISTRY}}/${{env.CONTAINER_REPOSITORY}}
+        tags: |
+          type=raw,value=latest
+          type=ref,event=branch
+          type=sha,format=short
+
+    - name: Login to ghcr.io
+      uses: docker/login-action@v3
+      with:
+        registry: ${{env.CONTAINER_REGISTRY}}
+        username: ${{github.actor}}
+        password: ${{secrets.GITHUB_TOKEN}}
+
+    - name: Build and Publish arm64 and amd64 Images
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/arm64,linux/amd64
+        push: true
+        tags: ${{steps.meta.outputs.tags}}
+
+    - name: Delete old Docker images
+      uses: actions/delete-package-versions@v5
+      with:
+        package-name: "vulnogram"
+        package-type: container
+        min-versions-to-keep: 2
+        token: ${{secrets.GITHUB_TOKEN}}
+
