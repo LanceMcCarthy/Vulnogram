@@ -1,6 +1,10 @@
 name: Publish To GHCR
 
 on:
+  push:
+    branches:
+      - main
+      - master
   workflow_dispatch:
       
 permissions:
@@ -56,6 +60,7 @@ jobs:
       with:
         package-name: "vulnogram"
         package-type: container
+        delete-only-untagged-versions: true
         min-versions-to-keep: 2
         token: ${{secrets.GITHUB_TOKEN}}
 
