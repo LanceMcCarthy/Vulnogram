@@ -1,6 +1,8 @@
-FROM --platform=linux/amd64 node:18
+FROM node:24-bookworm-slim
 
 # Create unprivileged user
+
+RUN apk update && apk upgrade && rm -rf /var/cache/apk/*
 
 RUN groupadd --system vulnogram && useradd --system --create-home --gid vulnogram vulnogram
 
