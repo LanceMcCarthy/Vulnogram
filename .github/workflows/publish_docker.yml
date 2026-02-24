@@ -1,11 +1,11 @@
-name: Publish LinkCheck.UI
+name: Publish To GHCR
 
 on:
   workflow_dispatch:
       
 permissions:
   contents: read
-  packages: write # For GitHub Packages auth
+  packages: write
 
 env:
   CONTAINER_REGISTRY: "ghcr.io"
