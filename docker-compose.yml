@@ -17,10 +17,10 @@ services:
       - ${MONGO_PORT:-27017}:${MONGO_PORT:-27017}
 
   vulnogram:
-    image: lancemccarthy/vulnogram:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/lancemccarthy/vulnogram:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     container_name: vulnogram
     env_file:
       - ${ENV_VAR_PATH:-example.env}
